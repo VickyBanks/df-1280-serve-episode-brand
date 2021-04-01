@@ -82,26 +82,159 @@ SELECT * FROM dataforce_sandbox.vb_uk_sounds_visits;
 
 
 --- Get the pages people went to
-SELECT DISTINCT destination,
-                dt,
+SELECT DISTINCT dt,
                 visit_id,
                 hashed_id,
                 app_type,
-                app_name,
-                device_type,
                 event_position::INT                                                    as page_position,
                 page_name,
-                central_insights_sandbox.udf_dataforce_pagename_content_ids(page_name) AS content_id
+                central_insights_sandbox.udf_dataforce_pagename_content_ids(page_name) AS content_id,
+                central_insights_sandbox.udf_dataforce_page_type(page_name)            AS page_type,
+                CASE
+                    WHEN page_type IN ('schedule_page', 'stations') THEN 'Stations & Schedules'
+                    WHEN page_type IN ('my_sounds_bookmarks', 'my_sounds_latest', 'my_sounds_subscribed')
+                        THEN 'My Sounds'
+                    WHEN page_type IN ('live_playspace', 'live_playspace_pop_out') THEN 'Live Playspace'
+                    WHEN page_type = 'od_playspace' THEN 'On-Demand Playspace'
+                    WHEN page_type = 'listen_page' THEN 'Listen Page'
+                    WHEN page_type IN ('tag_page', 'category_page') THEN 'Category Page'
+                    WHEN page_type = 'tleo_page' THEN 'TLEO (Brand/Series) Page'
+                    ELSE 'Other Page' END                                              AS page_type_new--,
+                --row_number() over (partition by dt, visit_id, page_name ORDER )
+                --sum(playback_time) as playback_time_total
+
 FROM s3_audience.audience_activity
 WHERE destination = 'PS_SOUNDS'
-  AND dt between 20210322 and 20210328
+  AND dt = 20210322 --between 20210322 and 20210328
   AND is_signed_in = true
   AND geo_country_site_visited = 'United Kingdom'
-  AND source = 'Events'
+  --AND source = 'Events'
   AND NOT (page_name = 'keepalive'
     OR page_name ILIKE '%mvt.activated%'
     OR page_name ILIKE 'iplayer.load.page'
     OR page_name ILIKE 'sounds.startup.page'
     OR page_name ILIKE 'sounds.load.page')
+  AND (page_name ILIKE '%play%' or page_name ILIKE '%brand%')
+AND page_name NOT ILIKE '%world service%'
+
+ORDER BY dt, visit_id, event_position
 LIMIT 100
 ;
+
+-------- Mimic the journeys work to get sequential pages --------
+---------- Script to get journeys --------------
+
+-- Step 1: Get consecutive pages for each visit in the date range
+DROP TABLE IF EXISTS central_insights_sandbox.vb_sounds_journey_pages;
+CREATE TABLE central_insights_sandbox.vb_sounds_journey_pages AS
+SELECT destination,
+       dt,
+       visit_id,
+       hashed_id,
+       app_type,
+       app_name,
+       device_type,
+       event_position::INT as page_position,
+       page_name,
+       central_insights_sandbox.udf_dataforce_pagename_content_ids(page_name) AS content_id,
+       central_insights_sandbox.udf_dataforce_page_type(page_name)            AS page_type,
+                CASE
+                    WHEN page_type IN ('schedule_page', 'stations') THEN 'Stations & Schedules'
+                    WHEN page_type IN ('my_sounds_bookmarks', 'my_sounds_latest', 'my_sounds_subscribed')
+                        THEN 'My Sounds'
+                    WHEN page_type IN ('live_playspace', 'live_playspace_pop_out') THEN 'Live Playspace'
+                    WHEN page_type = 'od_playspace' THEN 'On-Demand Playspace'
+                    WHEN page_type = 'listen_page' THEN 'Listen Page'
+                    WHEN page_type IN ('tag_page', 'category_page') THEN 'Category Page'
+                    WHEN page_type = 'tleo_page' THEN 'TLEO (Brand/Series) Page'
+                    ELSE 'Other Page' END                                              AS page_type_simple
+FROM s3_audience.audience_activity
+WHERE destination = 'PS_SOUNDS'
+  AND  dt = 20210322 --between 20210322 and 20210328
+  AND is_signed_in = true
+  AND geo_country_site_visited = 'United Kingdom'
+  AND ((destination = 'PS_SOUNDS' and source = 'Events') OR destination = 'PS_IPLAYER') -- correct source for each destination
+  AND NOT (page_name = 'keepalive'
+    OR page_name ILIKE '%mvt.activated%'
+    OR page_name ILIKE 'iplayer.load.page'
+    OR page_name ILIKE 'sounds.startup.page'
+    OR page_name ILIKE 'sounds.load.page')
+;
+
+SELECt * FROM central_insights_sandbox.vb_sounds_journey_pages ORDER BY dt, visit_id, page_position LIMIT 100;
+
+-- Step 2: Remove duplicate consecutive pages
+-- Step 2a - find previous page
+drop table if exists central_insights_sandbox.vb_sounds_journey_deduped_pages;
+create table central_insights_sandbox.vb_sounds_journey_deduped_pages as
+select destination,
+       dt,
+       visit_id,
+       hashed_id,
+       app_type,
+       app_name,
+       device_type,
+       page_position,
+       page_name,
+       content_id,
+       page_type,
+       page_type_simple,
+       lag(page_name, 1) over (partition by dt, visit_id, destination order by page_position::INT asc) as prev_page
+from central_insights_sandbox.vb_sounds_journey_pages
+;
+
+-- Step 2b - remove any duplicates
+delete
+from central_insights_sandbox.vb_sounds_journey_deduped_pages
+where page_name = prev_page;
+
+alter table central_insights_sandbox.vb_sounds_journey_deduped_pages
+    drop column prev_page;
+
+SELECT * FROM central_insights_sandbox.vb_sounds_journey_deduped_pages ORDER BY dt, visit_id, page_position LIMIT 100;
+
+--sounds.play.w3ct1rfd.page
+--sounds.brand.p09b3h1l.page
+--sounds.play.p09bts3r.page
+
+--- Get playback times for pages
+DROP TABLE IF EXISTS central_insights_sandbox.vb_sounds_journey_playback;
+CREATE TABLE central_insights_sandbox.vb_sounds_journey_playback AS
+SELECT destination,
+       dt,
+       visit_id,
+       hashed_id,
+       app_type,
+       app_name,
+       device_type,
+       page_name,
+       central_insights_sandbox.udf_dataforce_pagename_content_ids(page_name) AS content_id,
+       central_insights_sandbox.udf_dataforce_page_type(page_name)            AS page_type,
+                CASE
+                    WHEN page_type IN ('schedule_page', 'stations') THEN 'Stations & Schedules'
+                    WHEN page_type IN ('my_sounds_bookmarks', 'my_sounds_latest', 'my_sounds_subscribed')
+                        THEN 'My Sounds'
+                    WHEN page_type IN ('live_playspace', 'live_playspace_pop_out') THEN 'Live Playspace'
+                    WHEN page_type = 'od_playspace' THEN 'On-Demand Playspace'
+                    WHEN page_type = 'listen_page' THEN 'Listen Page'
+                    WHEN page_type IN ('tag_page', 'category_page') THEN 'Category Page'
+                    WHEN page_type = 'tleo_page' THEN 'TLEO (Brand/Series) Page'
+                    ELSE 'Other Page' END                                              AS page_type_simple,
+       sum(playback_time) as playback_time_total
+FROM s3_audience.audience_activity
+WHERE destination = 'PS_SOUNDS'
+  AND  dt = 20210322 --between 20210322 and 20210328
+  AND is_signed_in = true
+  AND geo_country_site_visited = 'United Kingdom'
+  AND NOT (page_name = 'keepalive'
+    OR page_name ILIKE '%mvt.activated%'
+    OR page_name ILIKE 'iplayer.load.page'
+    OR page_name ILIKE 'sounds.startup.page'
+    OR page_name ILIKE 'sounds.load.page')
+GROUP BY 1,2,3,4,5,6,7,8,9,10
+;
+
+SELECT * FROM central_insights_sandbox.vb_sounds_journey_playback  WHERE visit_id in(13, 15,25) ORDER BY dt, visit_id LIMIT 100;
+
+-- Need to find a way to join in the pages with playback time to the page list BUT if they go away and return we need to de-dup
+-- ALSO how does playback time work when they've got the persistent player?
