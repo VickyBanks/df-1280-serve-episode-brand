@@ -1,11 +1,11 @@
 /*
  Is there a correlation between the success of a module and whether it gives brand/episode
  */
-DROP TABLE vb_vmb;
+DROP TABLE dataforce_sandbox.vb_vmb;
 CREATE TABLE dataforce_sandbox.vb_vmb AS
-    SELECT DISTINCT brand_id, brand_title, series_id, series_title, episode_id, episode_title, version_id
+    SELECT DISTINCT master_brand_name,master_brand_id, brand_id, brand_title, series_id, series_title, episode_id, episode_title, version_id
     FROM prez.scv_vmb;
-SELECT version_id FROM dataforce_sandbox.vb_vmb LIMIT 10;
+SELECT * FROM dataforce_sandbox.vb_vmb LIMIT 10;
 --SELECT distinct version_id from vb_vmb;
 
 --How many clicks to each id type are there going via TLEO or not?
