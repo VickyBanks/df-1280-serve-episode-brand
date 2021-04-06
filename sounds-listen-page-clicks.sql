@@ -161,7 +161,11 @@ WHERE destination = 'PS_SOUNDS'
     OR page_name ILIKE 'sounds.load.page')
 ;
 
-SELECt * FROM central_insights_sandbox.vb_sounds_journey_pages ORDER BY dt, visit_id, page_position LIMIT 100;
+SELECT * FROM central_insights_sandbox.vb_sounds_journey_pages WHERE visit_id = 15 ORDER BY dt, visit_id, page_position LIMIT 100;
+
+SELECT * FROM s3_audience.audience_activity
+WHERE destination = 'PS_SOUNDS'
+  AND  dt = 20210322 AND visit_id = 15;
 
 -- Step 2: Remove duplicate consecutive pages
 -- Step 2a - find previous page
@@ -207,23 +211,27 @@ SELECT destination,
        app_type,
        app_name,
        device_type,
+       event_position::INT                                                    as page_position,
        page_name,
        central_insights_sandbox.udf_dataforce_pagename_content_ids(page_name) AS content_id,
+       version_id,
+       play_id,
        central_insights_sandbox.udf_dataforce_page_type(page_name)            AS page_type,
-                CASE
-                    WHEN page_type IN ('schedule_page', 'stations') THEN 'Stations & Schedules'
-                    WHEN page_type IN ('my_sounds_bookmarks', 'my_sounds_latest', 'my_sounds_subscribed')
-                        THEN 'My Sounds'
-                    WHEN page_type IN ('live_playspace', 'live_playspace_pop_out') THEN 'Live Playspace'
-                    WHEN page_type = 'od_playspace' THEN 'On-Demand Playspace'
-                    WHEN page_type = 'listen_page' THEN 'Listen Page'
-                    WHEN page_type IN ('tag_page', 'category_page') THEN 'Category Page'
-                    WHEN page_type = 'tleo_page' THEN 'TLEO (Brand/Series) Page'
-                    ELSE 'Other Page' END                                              AS page_type_simple,
-       sum(playback_time) as playback_time_total
+       CASE
+           WHEN page_type IN ('schedule_page', 'stations') THEN 'Stations & Schedules'
+           WHEN page_type IN ('my_sounds_bookmarks', 'my_sounds_latest', 'my_sounds_subscribed')
+               THEN 'My Sounds'
+           WHEN page_type IN ('live_playspace', 'live_playspace_pop_out') THEN 'Live Playspace'
+           WHEN page_type = 'od_playspace' THEN 'On-Demand Playspace'
+           WHEN page_type = 'listen_page' THEN 'Listen Page'
+           WHEN page_type IN ('tag_page', 'category_page') THEN 'Category Page'
+           WHEN page_type = 'tleo_page' THEN 'TLEO (Brand/Series) Page'
+           ELSE 'Other Page' END                                              AS page_type_simple,
+       --sum(playback_time) as playback_time_total
+       playback_time
 FROM s3_audience.audience_activity
 WHERE destination = 'PS_SOUNDS'
-  AND  dt = 20210322 --between 20210322 and 20210328
+  AND dt = 20210322 --between 20210322 and 20210328
   AND is_signed_in = true
   AND geo_country_site_visited = 'United Kingdom'
   AND NOT (page_name = 'keepalive'
@@ -231,10 +239,32 @@ WHERE destination = 'PS_SOUNDS'
     OR page_name ILIKE 'iplayer.load.page'
     OR page_name ILIKE 'sounds.startup.page'
     OR page_name ILIKE 'sounds.load.page')
-GROUP BY 1,2,3,4,5,6,7,8,9,10
+--GROUP BY 1,2,3,4,5,6,7,8,9,10
 ;
 
-SELECT * FROM central_insights_sandbox.vb_sounds_journey_playback  WHERE visit_id in(13, 15,25) ORDER BY dt, visit_id LIMIT 100;
+SELECT * FROM central_insights_sandbox.vb_sounds_journey_playback  WHERE visit_id in(13, 15,25) ORDER BY dt, visit_id, page_position ;
+SELECT visit_id, page_name, play_id, sum(playback_time)
+FROM central_insights_sandbox.vb_sounds_journey_playback
+WHERE visit_id in(13, 15,25)
+GROUP BY 1,2,3
+ORDER BY visit_id;
 
 -- Need to find a way to join in the pages with playback time to the page list BUT if they go away and return we need to de-dup
 -- ALSO how does playback time work when they've got the persistent player?
+
+--- What's happening in publisher?
+/*
+ These are all click labels
+content~autoplay
+episode~request
+episode~start
+episode~extended-play
+episode~complete
+
+ The autoplay label sends and then the request label both as a click to start the content.
+ BUT not all devices have these labels yet.
+ */
+SELECT * FROM s3_audience.publisher
+WHERE destination = 'PS_SOUNDS'
+  AND dt = 20210322
+AND visit_id = 15;
