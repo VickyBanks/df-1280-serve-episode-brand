@@ -255,13 +255,12 @@ ORDER BY visit_id;
 --- What's happening in publisher?
 /*
  These are all click labels
-content~autoplay
-episode~request
-episode~start
-episode~extended-play
-episode~complete
+content~autoplay - click to content
+episode~request - 3s play
+episode~start - 30s play
+episode~extended-play - 30 mins play
+episode~complete - 90% complete
 
- The autoplay label sends and then the request label both as a click to start the content.
  BUT not all devices have these labels yet.
  */
 SELECT * FROM s3_audience.publisher
